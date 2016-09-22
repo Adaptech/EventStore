@@ -80,10 +80,10 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                         }, null, false, "", 4, 3, true, 200));
         }
 
-        [Test, ExpectedException(typeof (InvalidOperationException))]
+        [Test]
         public void cannot_be_resumed()
         {
-            _edp.Resume();
+            Assert.Throws<InvalidOperationException>(()=> { _edp.Resume(); });
         }
 
         [Test]
@@ -144,9 +144,10 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                          .FromEventNumber);
         }
 
-        [Test, ExpectedException(typeof (InvalidOperationException))]
+        [Test]
         public void cannot_handle_repeated_read_events_completed()
         {
+            Assert.Throws<InvalidOperationException>(() => {
             _edp.Handle(
                 new ClientMessage.ReadStreamEventsForwardCompleted(
                     _distibutionPointCorrelationId, "stream", 100, 100, ReadStreamResult.Success,
@@ -159,6 +160,7 @@ namespace EventStore.Projections.Core.Tests.Services.event_reader.multi_stream_r
                             PrepareFlags.SingleWrite | PrepareFlags.TransactionBegin | PrepareFlags.TransactionEnd,
                             "event_type", new byte[0], new byte[0]))
                         }, null, false, "", 11, 10, true, 100));
+            });
         }
 
         [Test]
