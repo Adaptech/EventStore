@@ -15,7 +15,7 @@ namespace EventStore.Core.TransactionLog.Unbuffered
         private readonly int _readBufferSize;
         private readonly IntPtr _writeBufferOriginal;
         private readonly IntPtr _readBufferOriginal;
-        private readonly uint _blockSize;
+        private readonly int _blockSize;
         private long _bufferedCount;
         private bool _aligned;
         private long _lastPosition;
@@ -24,7 +24,7 @@ namespace EventStore.Core.TransactionLog.Unbuffered
         private long _readLocation = -1;
         private bool _needsRead;
 
-        private UnbufferedFileStream(SafeFileHandle handle, uint blockSize, int internalWriteBufferSize, int internalReadBufferSize)
+        private UnbufferedFileStream(SafeFileHandle handle, int blockSize, int internalWriteBufferSize, int internalReadBufferSize)
         {
             _handle = handle;
             _readBufferSize = internalReadBufferSize;
@@ -36,7 +36,7 @@ namespace EventStore.Core.TransactionLog.Unbuffered
             _blockSize = blockSize;
         }
 
-        private byte* Align(IntPtr buf, uint alignTo)
+        private byte* Align(IntPtr buf, int alignTo)
         {
             //This makes an aligned buffer linux needs this.
             //The buffer must originally be at least one alignment bigger!
@@ -53,9 +53,9 @@ namespace EventStore.Core.TransactionLog.Unbuffered
             int internalWriteBufferSize,
             int internalReadBufferSize,
             bool writeThrough,
-            uint minBlockSize)
+            int minBlockSize)
         {
-            var blockSize = NativeFile.GetDriveSectorSize(path);
+            int blockSize = (int) NativeFile.GetDriveSectorSize(path);
             blockSize = blockSize > minBlockSize ? blockSize : minBlockSize;
             if (internalWriteBufferSize % blockSize != 0)
                 throw new Exception("write buffer size must be aligned to block size of " + blockSize + " bytes");
@@ -78,7 +78,7 @@ namespace EventStore.Core.TransactionLog.Unbuffered
             }
             if (_bufferedCount == alignedbuffer)
             {
-                InternalWrite(_writeBuffer, (uint)_bufferedCount);
+                WriteInternal(_writeBuffer, (uint)_bufferedCount);
                 _lastPosition = positionAligned + _bufferedCount;
                 _bufferedCount = 0;
                 _aligned = true;
@@ -86,7 +86,7 @@ namespace EventStore.Core.TransactionLog.Unbuffered
             else
             {
                 var left = _bufferedCount - alignedbuffer;
-                InternalWrite(_writeBuffer, (uint)(alignedbuffer + _blockSize));
+                WriteInternal(_writeBuffer, (uint)(alignedbuffer + _blockSize));
                 _lastPosition = positionAligned + alignedbuffer;
                 SetBuffer(alignedbuffer, left);
                 _bufferedCount = left;
@@ -126,13 +126,21 @@ namespace EventStore.Core.TransactionLog.Unbuffered
 
         private void SeekInternal(long positionAligned, SeekOrigin origin)
         {
+            Console.WriteLine("seek to " + positionAligned);
             NativeFile.Seek(_handle, positionAligned, origin);
         }
 
-        private void InternalWrite(byte* buffer, uint count)
+        private void WriteInternal(byte* buffer, uint count)
         {
-            var written = 0;
+            var written = 0; //TODO this needs to loop
+            Console.WriteLine("write " + count + " bytes");
             NativeFile.Write(_handle, buffer, count, ref written);
+        }
+
+        private int ReadInternal(byte *dest, int offset, int count)
+        {
+            Console.WriteLine("read " + count + "bytes");
+            return NativeFile.Read(_handle, dest, 0, count);
         }
 
         public override long Seek(long offset, SeekOrigin origin)
@@ -143,11 +151,11 @@ namespace EventStore.Core.TransactionLog.Unbuffered
             if (origin == SeekOrigin.End) mungedOffset = Length + offset;
             var aligned = GetLowestAlignment(mungedOffset);
             var left = (int)(mungedOffset - aligned);
+            Console.WriteLine("external seek called aligned is " + aligned + "base is " + _aligned + " bufferedCount is " + _bufferedCount);
             Flush();
             _bufferedCount = left;
             _aligned = aligned == left;
             _lastPosition = aligned;
-            //TODO cant do two seeks + a read here.
             SeekInternal(aligned, SeekOrigin.Begin);
             _needsRead = true;
             return offset;
@@ -169,6 +177,7 @@ namespace EventStore.Core.TransactionLog.Unbuffered
 
         public override int Read(byte[] buffer, int offset, int count)
         {
+            Console.WriteLine("read offset " + offset + " count " + count);
             CheckDisposed();
             if (offset < 0 || buffer.Length < offset) throw new ArgumentException("offset");
             if (count < 0 || buffer.Length < count) throw new ArgumentException("offset");
@@ -180,8 +189,15 @@ namespace EventStore.Core.TransactionLog.Unbuffered
             var bytesRead = _readBufferSize;
             if (_readLocation + _readBufferSize <= position || _readLocation > position || _readLocation == -1)
             {
-                SeekInternal(position, SeekOrigin.Begin);
-                bytesRead = NativeFile.Read(_handle, _readBuffer, 0, _readBufferSize);
+                if(_readLocation + _readBufferSize != position)
+                {
+                    SeekInternal(position, SeekOrigin.Begin);
+                }
+                var toRead = _readBufferSize;
+                if(count < _readBufferSize) toRead = (int) GetLowestAlignment(count) + _blockSize;
+                if(count < _blockSize) toRead = _blockSize;
+                Console.WriteLine("reading " + toRead + " bytes buffer size is " + _readBufferSize);
+                bytesRead = ReadInternal(_readBuffer, 0, toRead);
                 _readLocation = position;
             }
             else if (_readLocation != position)
@@ -207,7 +223,7 @@ namespace EventStore.Core.TransactionLog.Unbuffered
             long current = offset;
             if(_needsRead) {
                 SeekInternal(_lastPosition, SeekOrigin.Begin);
-                NativeFile.Read(_handle, _writeBuffer, 0, (int)_blockSize);
+                ReadInternal(_writeBuffer, 0, (int)_blockSize);
                 SeekInternal(_lastPosition, SeekOrigin.Begin);
                 _needsRead = false;
             }
@@ -286,7 +302,9 @@ namespace EventStore.Core.TransactionLog.Unbuffered
             set
             {
                 CheckDisposed();
-                Seek(value, SeekOrigin.Begin);
+                Console.WriteLine("SetPosition called: value is" + value + " lastPosition is " + _lastPosition + " bufferedCount is " + _bufferedCount);
+                if(GetLowestAlignment(value) != GetLowestAlignment(_lastPosition))
+                    Seek(value, SeekOrigin.Begin);
             }
         }
 

@@ -354,7 +354,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                             FileShare.ReadWrite,
                             false,
                             1024 * 1024,
-                            4096,
+                            4096 * 32,
                             false,
                             4096);
             }
@@ -445,7 +445,7 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                                     FileShare.Read,
                                     false,
                                     4096*1024,
-                                    4096,
+                                    4096 * 32,
                                     _writeThrough,
                                     4096);
             }
@@ -519,8 +519,18 @@ namespace EventStore.Core.TransactionLog.Chunks.TFChunk
                 reader.Stream.Seek(0, SeekOrigin.Begin);
                 var stream = reader.Stream;
 #else
-            using (var reader = UnbufferedFileReadStream.Open(_filename))
+            using (var reader = UnbufferedFileStream.Create(
+                                    _filename,
+                                    FileMode.Open,
+                                    FileAccess.Read,
+                                    FileShare.ReadWrite,
+                                    false,
+                                    4096,
+                                    4096 * 1024,
+                                    false,
+                                    4096))
             {
+                reader.Seek(0, SeekOrigin.Begin);
                 var stream = reader;
 #endif
                 var footer = _chunkFooter;
